@@ -27,6 +27,7 @@ const participantSchema = joi.object({
   name: joi.string().required()
 })
 
+/* Participants Routes */
 server.post("/participants", async (req, res) => {
   const validation = participantSchema.validate(req.body)
 
@@ -71,6 +72,27 @@ server.get("/participants", async (req, res) => {
     const participants = await participantsCollection.find({}).toArray()
     
     res.send(participants)
+    mongoClient.close()
+  } catch {
+    res.sendStatus(500)
+    mongoClient.close()
+  }
+})
+
+/* Messages Routes */
+server.get("/messages", async (req, res) => {
+  const limit = req.query.limit
+  let messages = []
+  const {mongoClient, db} = await connectToDB()
+  const messagesCollection = db.collection("messages")
+
+  try {
+    const userMessages = await messagesCollection.find({}).toArray()
+
+    if(limit)
+      messages = userMessages.slice(-limit)
+    
+    res.send(messages)
     mongoClient.close()
   } catch {
     res.sendStatus(500)
