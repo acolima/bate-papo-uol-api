@@ -23,8 +23,17 @@ async function connectToDB(){
   }
 }
 
+/* Schemes */
 const participantSchema = joi.object({
   name: joi.string().required()
+})
+
+const messageSchema = joi.object({
+  to: joi.string().required(),
+  text: joi.string().required(),
+  type: joi.string().regex(/message|private_message/).required(),
+  from: joi.string().required(),
+  time: joi.string().required()
 })
 
 /* Participants Routes */
@@ -80,18 +89,52 @@ server.get("/participants", async (req, res) => {
 })
 
 /* Messages Routes */
-server.get("/messages", async (req, res) => {
-  const limit = req.query.limit
-  let messages = []
+server.post("/messages", async (req, res) => {
   const {mongoClient, db} = await connectToDB()
   const messagesCollection = db.collection("messages")
+  const participantsCollection = db.collection("participants")
+  const time = dayjs().format("HH:mm:ss")
 
+  const participants = await participantsCollection.find({}).toArray()
+  const inParticipantsList = participants.find(participant => participant.name === req.headers.user)
+  
+  const message = {...req.body, from: req.headers.user, time }
+  
+  const validation = messageSchema.validate(message)
+  
+  if(validation.error || !inParticipantsList){
+    res.sendStatus(422)
+    return
+  }
+
+  try{
+    await messagesCollection.insertOne(message)
+    
+    res.sendStatus(201)
+    mongoClient.close()
+  } catch {
+    res.sendStatus(500)
+    mongoClient.close()  
+  }
+})
+
+server.get("/messages", async (req, res) => {
+  const limit = req.query.limit
+  // const user = req.headers.user
+  // console.log(user)
+  
+  
+  const {mongoClient, db} = await connectToDB()
+  const messagesCollection = db.collection("messages")
+  
   try {
     const userMessages = await messagesCollection.find({}).toArray()
+    let messages = userMessages
 
     if(limit)
       messages = userMessages.slice(-limit)
     
+    //console.log(messages)
     res.send(messages)
     mongoClient.close()
   } catch {
