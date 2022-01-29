@@ -42,6 +42,7 @@ server.post("/participants", async (req, res) => {
 
   if(validation.error){
     res.sendStatus(422)
+    mongoClient.close()
     return
   }
 
@@ -104,6 +105,7 @@ server.post("/messages", async (req, res) => {
   
   if(validation.error || !inParticipantsList){
     res.sendStatus(422)
+    mongoClient.close()
     return
   }
 
@@ -143,5 +145,28 @@ server.get("/messages", async (req, res) => {
   }
 })
 
+/* Status Route */
+server.post("/status", async (req, res) => {
+  const {mongoClient, db} = await connectToDB()
+  const participantsCollection = db.collection("participants")
+
+  const participant = await participantsCollection.findOne({name: req.headers.user})
+
+  if(!participant){
+    res.sendStatus(404)
+    mongoClient.close()
+    return
+  }
+
+  try{
+    const user = {name: req.headers.user, lastStatus: Date.now()}
+    await participantsCollection.updateOne({name: req.headers.user}, {$set: user})
+    res.sendStatus(200)
+    mongoClient.close()
+  } catch {
+    res.sendStatus(500)
+    mongoClient.close()
+  }
+})
 
 server.listen(5000, () => console.log("Listening on port 5000"))
