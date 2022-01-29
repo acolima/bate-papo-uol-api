@@ -42,7 +42,6 @@ server.post("/participants", async (req, res) => {
 
   if(validation.error){
     res.sendStatus(422)
-    mongoClient.close()
     return
   }
 
@@ -122,22 +121,23 @@ server.post("/messages", async (req, res) => {
 
 server.get("/messages", async (req, res) => {
   const limit = req.query.limit
-  // const user = req.headers.user
-  // console.log(user)
-  
-  
+  const user = req.headers.user
+ 
   const {mongoClient, db} = await connectToDB()
   const messagesCollection = db.collection("messages")
   
   try {
-    const userMessages = await messagesCollection.find({}).toArray()
-    let messages = userMessages
+    const messages = await messagesCollection.find({}).toArray()
+    const userMessages = messages.filter(message => 
+      message.to === "Todos" || message.to === req.headers.user || message.from === req.headers.user
+    )
 
-    if(limit)
-      messages = userMessages.slice(-limit)
+    if(limit){
+      res.send(userMessages.slice(-limit))
+      return
+    }
     
-    //console.log(messages)
-    res.send(messages)
+    res.send(userMessages)
     mongoClient.close()
   } catch {
     res.sendStatus(500)
