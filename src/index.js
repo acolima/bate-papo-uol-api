@@ -23,6 +23,28 @@ async function connectToDB(){
   }
 }
 
+setInterval(async () => {
+  const {mongoClient, db} = await connectToDB()
+  const participantsCollection = db.collection("participants")
+  const messagesCollection = db.collection("messages")
+
+  const participants = await participantsCollection.find({}).toArray()
+
+  for(const participant of participants)
+    if(participant.lastStatus < (Date.now() - 10000)){
+      await participantsCollection.deleteOne({_id: participant._id})
+      await messagesCollection.insertOne({
+        from: participant.name, 
+        to: 'Todos', 
+        text: 'sai da sala...',
+        type: 'status',
+        time: dayjs().format('HH:mm:ss')
+      })
+    }
+  
+  mongoClient.close()
+}, 15000)
+
 /* Schemes */
 const participantSchema = joi.object({
   name: joi.string().required()
@@ -38,31 +60,29 @@ const messageSchema = joi.object({
 
 /* Participants Routes */
 server.post("/participants", async (req, res) => {
-  const validation = participantSchema.validate(req.body)
-
-  if(validation.error){
-    res.sendStatus(422)
-    return
-  }
-
   const {mongoClient, db} = await connectToDB()
   const participantsCollection = db.collection("participants")
   const messagesCollection = db.collection("messages")
-
   const participants = await participantsCollection.find({}).toArray()
+  
+  const validation = participantSchema.validate(req.body)
+  if(validation.error){
+    res.sendStatus(422)
+    mongoClient.close()
+    return
+  }
+  
   const nameTaken = participants.find(participant => participant.name === req.body.name)
-
   if(!nameTaken){
-    const message = {
-      from: req.body.name, 
-      to: 'Todos', 
-      text: 'entra na sala...',
-      type: 'status',
-      time: dayjs().format('HH:mm:ss')
-    }
     try {
       await participantsCollection.insertOne({name: req.body.name, lastStatus: Date.now()})
-      await messagesCollection.insertOne(message)
+      await messagesCollection.insertOne({
+        from: req.body.name, 
+        to: 'Todos', 
+        text: 'entra na sala...',
+        type: 'status',
+        time: dayjs().format('HH:mm:ss')
+      })
       
       res.sendStatus(201)
       mongoClient.close()
@@ -93,16 +113,13 @@ server.post("/messages", async (req, res) => {
   const {mongoClient, db} = await connectToDB()
   const messagesCollection = db.collection("messages")
   const participantsCollection = db.collection("participants")
-  const time = dayjs().format("HH:mm:ss")
 
-  const participants = await participantsCollection.find({}).toArray()
-  const inParticipantsList = participants.find(participant => participant.name === req.headers.user)
+  const participants = await participantsCollection.find({name: req.headers.user}).toArray()
   
-  const message = {...req.body, from: req.headers.user, time }
+  const message = {...req.body, from: req.headers.user, time: dayjs().format("HH:mm:ss")}
   
   const validation = messageSchema.validate(message)
-  
-  if(validation.error || !inParticipantsList){
+  if(validation.error || !participants){
     res.sendStatus(422)
     mongoClient.close()
     return
@@ -129,14 +146,16 @@ server.get("/messages", async (req, res) => {
   try {
     const messages = await messagesCollection.find({}).toArray()
     const userMessages = messages.filter(message => 
-      message.to === "Todos" || message.to === req.headers.user || message.from === req.headers.user
+      message.type === "message" || 
+      message.type === "status" || 
+      message.to === req.headers.user || 
+      message.from === req.headers.user
     )
 
     if(limit){
       res.send(userMessages.slice(-limit))
       return
     }
-    
     res.send(userMessages)
     mongoClient.close()
   } catch {
