@@ -17,14 +17,14 @@ async function connectToDB(){
     await mongoClient.connect()
     const db = mongoClient.db("BatePapo")
     
-    return {mongoClient, db}
+    return { mongoClient, db }
   } catch {
     console.log("Erro de conexão com servidor")
   }
 }
 
 setInterval(async () => {
-  const {mongoClient, db} = await connectToDB()
+  const { mongoClient, db } = await connectToDB()
   const participantsCollection = db.collection("participants")
   const messagesCollection = db.collection("messages")
 
@@ -60,23 +60,24 @@ const messageSchema = joi.object({
 
 /* Participants Routes */
 server.post("/participants", async (req, res) => {
-  const {mongoClient, db} = await connectToDB()
+  const name = req.body.name
+  const { mongoClient, db } = await connectToDB()
   const participantsCollection = db.collection("participants")
   const messagesCollection = db.collection("messages")
   const participants = await participantsCollection.find({}).toArray()
   
-  const validation = participantSchema.validate(req.body)
+  const validation = participantSchema.validate({name})
   if(validation.error){
     res.sendStatus(422)
     mongoClient.close()
     return
   }
   
-  const nameTaken = participants.find(participant => participant.name === req.body.name)
+  const nameTaken = participants.find(participant => participant.name === name)
   if(!nameTaken){
-    await participantsCollection.insertOne({name: req.body.name, lastStatus: Date.now()})
+    await participantsCollection.insertOne({name: name, lastStatus: Date.now()})
     await messagesCollection.insertOne({
-      from: req.body.name, 
+      from: name, 
       to: 'Todos', 
       text: 'entra na sala...',
       type: 'status',
@@ -90,7 +91,7 @@ server.post("/participants", async (req, res) => {
 })
 
 server.get("/participants", async (req, res) => {
-  const {mongoClient, db} = await connectToDB()
+  const { mongoClient, db } = await connectToDB()
   const participantsCollection = db.collection("participants")
 
   const participants = await participantsCollection.find({}).toArray()
@@ -101,16 +102,17 @@ server.get("/participants", async (req, res) => {
 
 /* Messages Routes */
 server.post("/messages", async (req, res) => {
-  const {mongoClient, db} = await connectToDB()
+  const name = req.headers.user
+  const { mongoClient, db } = await connectToDB()
   const messagesCollection = db.collection("messages")
   const participantsCollection = db.collection("participants")
 
-  const participant = await participantsCollection.find({name: req.headers.user}).toArray()
+  const participant = await participantsCollection.find({name: name}).toArray()
   
-  const message = {...req.body, from: req.headers.user, time: dayjs().format("HH:mm:ss")}
+  const message = {...req.body, from: name, time: dayjs().format("HH:mm:ss")}
   
   const validation = messageSchema.validate(message)
-  if(validation.error || !participant){
+  if(validation.error || participant.length === 0){
     res.sendStatus(422)
     mongoClient.close()
     return
@@ -124,17 +126,16 @@ server.post("/messages", async (req, res) => {
 
 server.get("/messages", async (req, res) => {
   const limit = req.query.limit
-  const user = req.headers.user
- 
-  const {mongoClient, db} = await connectToDB()
+  const name = req.headers.user
+  const { mongoClient, db } = await connectToDB()
   const messagesCollection = db.collection("messages")
   
   const messages = await messagesCollection.find({}).toArray()
   const userMessages = messages.filter(message => 
     message.type === "message" || 
     message.type === "status" || 
-    message.to === req.headers.user || 
-    message.from === req.headers.user
+    message.to === name || 
+    message.from === name
   )
 
   if(limit){
@@ -146,9 +147,11 @@ server.get("/messages", async (req, res) => {
 })
 
 server.delete("/messages/:id", async (req, res) => {
-  const {mongoClient, db} = await connectToDB()
+  const name = req.headers.user
+  const { id } = req.params
+  const { mongoClient, db } = await connectToDB()
   const messagesCollection = db.collection("messages")
-  const messages = await messagesCollection.findOne({_id: ObjectId(req.params.id)})
+  const messages = await messagesCollection.findOne({_id: ObjectId(id)})
 
   if(!messages){
     res.sendStatus(404)
@@ -156,7 +159,7 @@ server.delete("/messages/:id", async (req, res) => {
     return
   }
   
-  if(messages.from !== req.headers.user){
+  if(messages.from !== name){
     res.sendStatus(401)
     mongoClient.close()
     return
@@ -166,13 +169,49 @@ server.delete("/messages/:id", async (req, res) => {
   mongoClient.close()
 })
 
+server.put("/messages/:id", async (req, res) => {
+  const { mongoClient, db } = await connectToDB()
+  const { id } = req.params
+  const name = req.headers.user
+  const participantsCollection = db.collection("participants")
+  const messagesCollection = db.collection("messages")
+  
+  const participant = await participantsCollection.find({name: name}).toArray()
+  
+  const newMessage = {...req.body, from: name, time: dayjs().format("HH:mm:ss")}
+  
+  const validation = messageSchema.validate(newMessage)
+  if(validation.error || !participant){
+    res.sendStatus(422)
+    mongoClient.close()
+    return
+  }
+
+  const message = await messagesCollection.findOne({_id: new ObjectId(id)})
+  if(!message){
+    res.sendStatus(404)
+    mongoClient.close()
+    return
+  }
+
+  if(message.from !== req.headers.user){
+    res.sendStatus(401)
+    mongoClient.close()
+    return
+  }
+
+  await messagesCollection.updateOne({_id: new ObjectId(id)}, {$set: {text: newMessage.text}})
+  res.sendStatus(200)
+  mongoClient.close()
+})
 
 /* Status Route */
 server.post("/status", async (req, res) => {
-  const {mongoClient, db} = await connectToDB()
+  const name = req.headers.user
+  const { mongoClient, db } = await connectToDB()
   const participantsCollection = db.collection("participants")
 
-  const participant = await participantsCollection.findOne({name: req.headers.user})
+  const participant = await participantsCollection.findOne({name: name})
 
   if(!participant){
     res.sendStatus(404)
@@ -180,8 +219,8 @@ server.post("/status", async (req, res) => {
     return
   }
 
-  const user = {name: req.headers.user, lastStatus: Date.now()}
-  await participantsCollection.updateOne({name: req.headers.user}, {$set: user})
+  const user = {name, lastStatus: Date.now()}
+  await participantsCollection.updateOne({name: name}, {$set: user})
   res.sendStatus(200)
   mongoClient.close()
 })
