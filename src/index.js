@@ -1,5 +1,5 @@
 import express, { json } from "express"
-import { MongoClient } from "mongodb"
+import { MongoClient, ObjectId } from "mongodb"
 import dotenv from "dotenv"
 import cors from "cors"
 import joi from "joi"
@@ -160,6 +160,32 @@ server.get("/messages", async (req, res) => {
     mongoClient.close()
   } catch {
     res.sendStatus(500)
+    mongoClient.close()
+  }
+})
+
+server.delete("/messages/:id", async (req, res) => {
+  const {mongoClient, db} = await connectToDB()
+  const messagesCollection = db.collection("messages")
+  const messages = await messagesCollection.findOne({_id: ObjectId(req.params.id)})
+
+  if(!messages){
+    res.sendStatus(404)
+    mongoClient.close()
+    return
+  }
+  
+  if(messages.from !== req.headers.user){
+    res.sendStatus(401)
+    mongoClient.close()
+    return
+  }
+
+  try {
+    await messagesCollection.deleteOne({_id: messages._id})
+    mongoClient.close()
+  } catch {
+    res.send(500)
     mongoClient.close()
   }
 })
