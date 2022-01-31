@@ -4,6 +4,7 @@ import dotenv from "dotenv"
 import cors from "cors"
 import joi from "joi"
 import dayjs from "dayjs"
+import { stripHtml } from "string-strip-html"
 
 dotenv.config()
 
@@ -18,8 +19,8 @@ async function connectToDB(){
     const db = mongoClient.db("BatePapo")
     
     return { mongoClient, db }
-  } catch {
-    console.log("Erro de conexão com servidor")
+  } catch (error) {
+    console.error(error)
   }
 }
 
@@ -60,7 +61,7 @@ const messageSchema = joi.object({
 
 /* Participants Routes */
 server.post("/participants", async (req, res) => {
-  const name = req.body.name
+  const name = stripHtml(req.body.name).result.trim()
   const { mongoClient, db } = await connectToDB()
   const participantsCollection = db.collection("participants")
   const messagesCollection = db.collection("messages")
@@ -102,17 +103,23 @@ server.get("/participants", async (req, res) => {
 
 /* Messages Routes */
 server.post("/messages", async (req, res) => {
-  const name = req.headers.user
+  const name = stripHtml(req.headers.user).result
   const { mongoClient, db } = await connectToDB()
   const messagesCollection = db.collection("messages")
   const participantsCollection = db.collection("participants")
 
-  const participant = await participantsCollection.find({name: name}).toArray()
+  const participant = await participantsCollection.findOne({name: name})
   
-  const message = {...req.body, from: name, time: dayjs().format("HH:mm:ss")}
+  const message = {
+    to: stripHtml(req.body.to).result.trim(),
+    type: stripHtml(req.body.type).result.trim(),
+    text: stripHtml(req.body.text).result.trim(),
+    from: name, 
+    time: dayjs().format("HH:mm:ss")
+  }
   
   const validation = messageSchema.validate(message)
-  if(validation.error || participant.length === 0){
+  if(validation.error || !participant ){
     res.sendStatus(422)
     mongoClient.close()
     return
@@ -130,19 +137,13 @@ server.get("/messages", async (req, res) => {
   const { mongoClient, db } = await connectToDB()
   const messagesCollection = db.collection("messages")
   
-  const messages = await messagesCollection.find({}).toArray()
-  const userMessages = messages.filter(message => 
-    message.type === "message" || 
-    message.type === "status" || 
-    message.to === name || 
-    message.from === name
-  )
+  const messages = await messagesCollection.find({$or: [{from: name}, {to: name}, {type: "message"}, {type: "status"}]}).toArray()
 
   if(limit){
-    res.send(userMessages.slice(-limit))
+    res.send(messages.slice(-limit))
     return
   }
-  res.send(userMessages)
+  res.send(messages)
   mongoClient.close()
 })
 
@@ -207,7 +208,7 @@ server.put("/messages/:id", async (req, res) => {
 
 /* Status Route */
 server.post("/status", async (req, res) => {
-  const name = req.headers.user
+  const name = stripHtml(req.headers.user).result.trim()
   const { mongoClient, db } = await connectToDB()
   const participantsCollection = db.collection("participants")
 
